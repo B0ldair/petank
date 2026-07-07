@@ -128,61 +128,45 @@
 <script type="module">
 import * as THREE from 'three';
 
-/* =========================================================================
-   PÉTANQUE 3D PLAGE — v2 (refonte moteur)
-   - Physique balistique 3D : lancer en cloche, gravité, rebond mat, roulement.
-   - Pas de temps FIXE (120 Hz) via accumulateur → simulation déterministe,
-     identique sur tous les téléphones quel que soit le framerate.
-   - Le sol est à y=0, une boule ne peut JAMAIS passer dessous (clamp).
-   - Visée : grosse flèche au sol + trajectoire prédite en pointillés.
-   - Flow : l'hôte (Bleu) lance le cochonnet, l'adversaire (Rouge) joue
-     la 1re boule ; le joueur qui ne tient pas le point rejoue ; 13 pts.
-   ========================================================================= */
 
-// ---------- RÉGLAGES (les curseurs à toucher pour le game feel) ----------
-const FIELD_W=6, FIELD_L=13;          // terrain (m)
+const FIELD_W=6, FIELD_L=13;          
 const BALL_R=0.16, JACK_R=0.085;
 const BALLS_PER_PLAYER=3, WIN_SCORE=13;
 
-const PHYS_HZ=120, DT=1/PHYS_HZ;      // pas fixe → déterminisme
+const PHYS_HZ=120, DT=1/PHYS_HZ;     
 const GRAV=9.81;
-const ELEV=0.62;                      // angle d'élévation du lancer (~35°)
-const LAUNCH_Y=0.55;                  // hauteur de la main
-const SPEED_MIN=4.5, SPEED_RANGE=6.5; // vitesse boule : 4.5 → 11 m/s
+const ELEV=0.62;                    
+const LAUNCH_Y=0.55;                 
+const SPEED_MIN=4.5, SPEED_RANGE=6.5; 
 const JACK_SPEED_MIN=6.5, JACK_SPEED_RANGE=3.0;
 
-const GROUND_REST=0.22;               // rebond au sol (mat, boule lourde)
-const IMPACT_GRIP=0.72;               // le sable freine à l'atterrissage
-const BOUNCE_MIN=0.9;                 // sous cette vitesse verticale : on roule
-const ROLL_EXP=0.9915;                // friction de roulement (par step 120 Hz)
-const ROLL_LIN=0.55;                  // décélération linéaire (m/s²) → arrêt net
+const GROUND_REST=0.22;              
+const IMPACT_GRIP=0.72;             
+const BOUNCE_MIN=0.9;                
+const ROLL_EXP=0.9915;              
+const ROLL_LIN=0.55;                 
 const STOP_V=0.06;
-const REST_BALL=0.6;                  // choc acier/acier (carreau vif)
+const REST_BALL=0.6;              
 const WALL_REST=0.3;
 const M_BALL=1.0, M_JACK=0.3;
 
-// ---------- Supabase (colle tes clés ici pour zapper le panneau) ----------
 let SB_URL='https://ttkqdrycenkliwimcbgk.supabase.co/rest/v1/', SB_KEY='sb_publishable_s6E88nYXMBhLPJIsd-2w4A_B0upWXfe';
-// ---------- ÉTAT ----------
 const G={
   mode:'local', role:null, myTeam:0, code:null, channel:null,
   turn:0, thrown:[0,0], score:[0,0],
   balls:[], jack:null,
-  phase:'menu',           // menu|jackAim|aim|fly|settle|over
+  phase:'menu',         
   jackPlaced:false,
 };
 const START_Z=-FIELD_L/2+0.7;
 const TEAM_COLOR=[0x3b6fd4,0xe0483b];
 const TEAM_NAME=['Bleu','Rouge'];
 
-// =========================================================================
-//  SCÈNE — plage minimaliste : 4 plans + 2 palmiers, zéro extrusion
-// =========================================================================
 const app=document.getElementById('app');
 const renderer=new THREE.WebGLRenderer({antialias:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 renderer.setSize(innerWidth,innerHeight);
-app.appendChild(renderer.domElement);      // pas de shadow map : ombres = blobs
+app.appendChild(renderer.domElement);    
 
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(0x9ae4f2);
@@ -197,12 +181,11 @@ const flat=c=>new THREE.MeshLambertMaterial({color:c});
 const plane=(w,l,c,y)=>{const m=new THREE.Mesh(new THREE.PlaneGeometry(w,l),flat(c));
   m.rotation.x=-Math.PI/2; m.position.y=y; scene.add(m); return m;};
 
-plane(160,160,0x2fb6d6,-0.05);                         // mer
-const island=new THREE.Mesh(new THREE.CircleGeometry(13,10),flat(0xf0e0b0)); // île de sable, low poly
+plane(160,160,0x2fb6d6,-0.05);                         
+const island=new THREE.Mesh(new THREE.CircleGeometry(13,10),flat(0xf0e0b0)); 
 island.rotation.x=-Math.PI/2; island.rotation.z=0.3; island.position.y=-0.02;
 island.scale.set(0.85,1.15,1); scene.add(island);
-plane(FIELD_W,FIELD_L,0xe9d59f,0);                     // terrain de jeu (sol logique y=0)
-// lignes blanches fines aux 4 bords
+plane(FIELD_W,FIELD_L,0xe9d59f,0);                 
 const lineMat=flat(0xfbf6e6);
 [[0,-FIELD_L/2,FIELD_W+0.2,0.12],[0,FIELD_L/2,FIELD_W+0.2,0.12],
  [-FIELD_W/2,0,0.12,FIELD_L+0.2],[FIELD_W/2,0,0.12,FIELD_L+0.2]].forEach(([x,z,w,l])=>{
@@ -224,14 +207,12 @@ function palm(x,z,s=1){
 }
 palm(-FIELD_W/2-2.4,-4.5,1.05); palm(FIELD_W/2+2.6,5,0.9);
 
-// ---- Papé Marcel : le vieux du village sur sa chaise à bascule ----
 const ROCK_R=0.5;
 const papi=new THREE.Group();
-const rocker=new THREE.Group();            // pivot = centre de courbure des patins
+const rocker=new THREE.Group();          
 rocker.position.y=ROCK_R; papi.add(rocker);
 function pbox(w,h,d,c,x,y,z,rx=0){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),flat(c));
   m.position.set(x,y,z); m.rotation.x=rx; rocker.add(m); return m;}
-// patins courbes (arc vers le bas) — rotations appliquées à la géométrie
 for(const sx of [-0.22,0.22]){
   const g=new THREE.TorusGeometry(ROCK_R,0.035,6,14,Math.PI*0.75);
   g.rotateZ(-Math.PI/2-Math.PI*0.375); g.rotateY(Math.PI/2);
@@ -240,30 +221,27 @@ for(const sx of [-0.22,0.22]){
 // chaise
 pbox(0.05,0.16,0.05,0x8a6a42,-0.2,-0.42,0.15); pbox(0.05,0.16,0.05,0x8a6a42,0.2,-0.42,0.15);
 pbox(0.05,0.16,0.05,0x8a6a42,-0.2,-0.42,-0.15); pbox(0.05,0.16,0.05,0x8a6a42,0.2,-0.42,-0.15);
-pbox(0.52,0.05,0.44,0x9a7a4c,0,-0.34,0);                 // assise
-pbox(0.52,0.55,0.05,0x9a7a4c,0,-0.05,-0.25,-0.16);       // dossier
+pbox(0.52,0.05,0.44,0x9a7a4c,0,-0.34,0);                
+pbox(0.52,0.55,0.05,0x9a7a4c,0,-0.05,-0.25,-0.16);      
 // le papé
-pbox(0.3,0.1,0.3,0x4a6a8a,0,-0.27,0.1);                  // cuisses (jean)
-pbox(0.26,0.22,0.09,0x4a6a8a,0,-0.4,0.27);               // tibias
-pbox(0.09,0.06,0.16,0x6a4a2c,-0.08,-0.47,0.33); pbox(0.09,0.06,0.16,0x6a4a2c,0.08,-0.47,0.33); // espadrilles
-pbox(0.36,0.34,0.2,0xf2efe4,0,-0.04,-0.09,-0.1);         // marcel blanc
-pbox(0.07,0.3,0.07,0xeec39a,-0.24,-0.12,-0.02,0.55);     // bras
+pbox(0.3,0.1,0.3,0x4a6a8a,0,-0.27,0.1);                
+pbox(0.26,0.22,0.09,0x4a6a8a,0,-0.4,0.27);           
+pbox(0.09,0.06,0.16,0x6a4a2c,-0.08,-0.47,0.33); pbox(0.09,0.06,0.16,0x6a4a2c,0.08,-0.47,0.33);
+pbox(0.36,0.34,0.2,0xf2efe4,0,-0.04,-0.09,-0.1);        
+pbox(0.07,0.3,0.07,0xeec39a,-0.24,-0.12,-0.02,0.55);     
 pbox(0.07,0.3,0.07,0xeec39a,0.24,-0.12,-0.02,0.55);
 const pHead=new THREE.Mesh(new THREE.IcosahedronGeometry(0.14,1),flat(0xeec39a));
 pHead.position.set(0,0.27,-0.05); rocker.add(pHead);
 const pNose=new THREE.Mesh(new THREE.IcosahedronGeometry(0.035,0),flat(0xe2a87e));
 pNose.position.set(0,0.26,0.09); rocker.add(pNose);
-pbox(0.16,0.035,0.04,0xf5f5f5,0,0.21,0.09);              // moustache
+pbox(0.16,0.035,0.04,0xf5f5f5,0,0.21,0.09);             
 const beret=new THREE.Mesh(new THREE.CylinderGeometry(0.17,0.14,0.06,7),flat(0x3a3a4a));
 beret.position.set(0,0.39,-0.06); beret.rotation.z=0.12; rocker.add(beret);
 const bubbleAnchor=new THREE.Object3D(); bubbleAnchor.position.set(0,0.6,0); rocker.add(bubbleAnchor);
-papi.position.set(-FIELD_W/2-0.9,0,4.5);                 // près du fond, côté cochonnet
-papi.rotation.y=Math.PI/2+0.35;                          // tourné vers le terrain
+papi.position.set(-FIELD_W/2-0.9,0,4.5);           
+papi.rotation.y=Math.PI/2+0.35;                        
 scene.add(papi);
 
-// =========================================================================
-//  OBJETS DE JEU — boules + blob d'ombre (lit la hauteur et l'atterrissage)
-// =========================================================================
 function makeSphere(r,color,detail=1){
   const m=new THREE.Mesh(new THREE.IcosahedronGeometry(r,detail),flat(color));
   return m;
@@ -287,7 +265,6 @@ function clearEnd(){
   G.thrown=[0,0]; G.jackPlaced=false; G.lastBall=null;
 }
 
-// boule "fantôme" visible pendant la visée (montre d'où part le tir)
 const preview=makeSphere(BALL_R,0xffffff); preview.visible=false; scene.add(preview);
 function showPreview(){
   const isJack=G.phase==='jackAim';
@@ -298,9 +275,6 @@ function showPreview(){
   preview.position.set(0,r,START_Z); preview.visible=true;
 }
 
-// =========================================================================
-//  LANCERS (balistique : cloche → impact → roulement)
-// =========================================================================
 function launch(o,angle,power,isJack){
   const s=isJack?JACK_SPEED_MIN+power*JACK_SPEED_RANGE:SPEED_MIN+power*SPEED_RANGE;
   o.x=0; o.y=LAUNCH_Y; o.z=START_Z;
@@ -319,9 +293,6 @@ function doThrow(team,angle,power){
   startFly(b); updateHUD();
 }
 
-// =========================================================================
-//  PHYSIQUE — pas fixe, déterministe. Le sol (y=0) est infranchissable.
-// =========================================================================
 function stepOnce(){
   const objs=allObjs();
   // intégration + sol + murs
@@ -330,33 +301,32 @@ function stepOnce(){
     if(airborne||o.vy!==0) o.vy-=GRAV*DT;
     o.x+=o.vx*DT; o.y+=o.vy*DT; o.z+=o.vz*DT;
 
-    if(o.y<o.r){                       // contact sol
-      o.y=o.r;                         // ⟵ jamais sous le sol
+    if(o.y<o.r){                       
+      o.y=o.r;                         
       if(o.vy<0){
-        if(-o.vy>BOUNCE_MIN){          // rebond mat
+        if(-o.vy>BOUNCE_MIN){         
           impactFX(o,-o.vy);
           o.vy=-o.vy*GROUND_REST;
           o.vx*=IMPACT_GRIP; o.vz*=IMPACT_GRIP;
-        } else o.vy=0;                 // on passe en roulement
+        } else o.vy=0;              
       }
     }
     const onGround=o.y<=o.r+0.0005&&Math.abs(o.vy)<0.01;
     if(onGround){
       o.vy=0; o.y=o.r;
       const sp=Math.hypot(o.vx,o.vz);
-      if(sp>0){                        // friction roulement : expo + linéaire
+      if(sp>0){                       
         const ns=Math.max(0,sp*ROLL_EXP-ROLL_LIN*DT);
         const k=ns/sp; o.vx*=k; o.vz*=k;
       }
     }
-    const hw=FIELD_W/2-o.r, hl=FIELD_L/2-o.r;   // bords : rebond mou
+    const hw=FIELD_W/2-o.r, hl=FIELD_L/2-o.r;  
     if(o.x<-hw){o.x=-hw;o.vx=-o.vx*WALL_REST;} if(o.x>hw){o.x=hw;o.vx=-o.vx*WALL_REST;}
     if(o.z<-hl){o.z=-hl;o.vz=-o.vz*WALL_REST;} if(o.z>hl){o.z=hl;o.vz=-o.vz*WALL_REST;}
 
     o.moving=!(onGround&&Math.hypot(o.vx,o.vz)<STOP_V);
     if(!o.moving){o.vx=o.vz=0;}
   }
-  // collisions sphère-sphère 3D, impulsion avec masses
   for(let i=0;i<objs.length;i++)for(let j=i+1;j<objs.length;j++){
     const a=objs[i],c=objs[j];
     const dx=c.x-a.x,dy=c.y-a.y,dz=c.z-a.z;
@@ -394,9 +364,6 @@ function distToJack(o){return Math.hypot(o.x-G.jack.x,o.z-G.jack.z);}
 function leadingTeam(){let best=Infinity,t=-1;
   for(const b of G.balls){const d=distToJack(b);if(d<best){best=d;t=b.team;}}return t;}
 
-// =========================================================================
-//  EFFETS (visuels uniquement — jamais dans la simulation)
-// =========================================================================
 let shake=0;
 const sand=[]; for(let i=0;i<8;i++){
   const m=makeSphere(0.05,0xe6d29a,0); m.visible=false; scene.add(m);
@@ -423,16 +390,13 @@ function animFX(dt){
   shake=Math.max(0,shake-dt*0.8);
 }
 
-// =========================================================================
-//  PAPÉ — commentateur provençal (visuel uniquement, jamais dans la sim)
-// =========================================================================
 const PAPI={
   idle:["Mais joue, bordel !","Tu tires ou tu pointes, minot ?","On va pas y coucher, oh !",
-    "Le pastis va tiédir, boudiou !","Vé, il calcule, il calcule…"],
+    "Le pastis va tiédir, boudiou !","Vé, il calcule, il calcule…","J'ai l'temps d'mourir 2 fois !","C'pas p'ssible mais joue oh","ZzZzZzZzZzZzZz"],
   good:["Oh putaing, quel tir !","Adieu ! Ça c'est de la boule !","Peuchère, quelle finesse !",
-    "Tarpin fort, minot !"],
+    "Tarpin fort, minot !","C'tir peut réussir à m'faire bander","Tié un tigre, un lion",],
   bad:["Ah, j'aurais pointé, moi…","Oh le bras cassé, vé !","Ma grand-mère lance mieux, peuchère.",
-    "Boudiou, elle est partie à Cassis celle-là !"],
+    "Boudiou, elle est partie à Cassis celle-là !","Retourne à la canebière","Dégage d'mon terrain Parigo"],
   carreau:["Oh putaing, quel carreau !","Fan de chichourle !","Ça, c'est envoyé, boudiou !"],
   jack:["Vé, le bouchon !","Joli bouchon, minot.","Il est loin ce bouchon, té…"],
   points:["Et ça marque, peuchère !","Oh la bacchanale !","C'est qui le patron ? Té !"],
@@ -444,7 +408,7 @@ const papiBubble=document.getElementById('papiBubble'),papiTxt=document.getEleme
 let bubbleUntil=0,lastBubbleAt=-99999,lastNag=0,nextAmbient=20000,aimSince=0;
 function papiSay(cat,force){
   const now=performance.now();
-  if(!force&&now-lastBubbleAt<7000)return;   // anti-spam
+  if(!force&&now-lastBubbleAt<7000)return;   
   const list=PAPI[cat];
   papiTxt.textContent=list[Math.floor(Math.random()*list.length)];
   papiBubble.classList.add('show');
@@ -463,9 +427,7 @@ function updateBubble(now){
   } else papiBubble.style.visibility='hidden';
 }
 
-// =========================================================================
-//  CAMÉRA — top-down en visée, poursuite 3D pendant le vol
-// =========================================================================
+
 let flyObj=null;
 function updateCamera(){
   if(G.phase==='fly'&&flyObj){
@@ -485,11 +447,7 @@ function updateCamera(){
   camera.updateProjectionMatrix();
 }
 
-// =========================================================================
-//  VISÉE — flèche au sol + trajectoire prédite (pointillés)
-//  Fronde classique : la boule part à l'OPPOSÉ du glissement.
-//  angle = atan2(dx,dy), puissance = distance verticale du drag.
-// =========================================================================
+
 const arrowMat=new THREE.MeshBasicMaterial({color:0x8ef05a,transparent:true,opacity:0.95,depthWrite:false});
 const shaftGeo=new THREE.PlaneGeometry(0.16,1); shaftGeo.rotateX(-Math.PI/2); shaftGeo.translate(0,0,0.5);
 const shaft=new THREE.Mesh(shaftGeo,arrowMat);
@@ -510,7 +468,7 @@ function updateAimGfx(angle,power,isJack){
   shaft.scale.z=len; head.position.z=len+0.22;
   const c=power<0.4?0x8ef05a:power<0.75?0xf2c530:0xe0483b;
   arrowMat.color.setHex(c);
-  // trajectoire prédite : même intégration que la vraie sim (sans collisions)
+
   const s=isJack?JACK_SPEED_MIN+power*JACK_SPEED_RANGE:SPEED_MIN+power*SPEED_RANGE;
   const r=isJack?JACK_R:BALL_R;
   let x=0,y=LAUNCH_Y,z=START_Z;
@@ -524,7 +482,7 @@ function updateAimGfx(angle,power,isJack){
   for(let k=di;k<dots.length;k++)dots[k].visible=false;
 }
 
-// ---------- input tactile ----------
+
 let dragStart=null,aimAngle=0,aimPower=0;
 function myTurnToAct(){
   if(G.phase==='jackAim') return G.mode==='local'||G.role==='host';
@@ -561,9 +519,7 @@ cv.addEventListener('pointerup',e=>{
   }
 });
 
-// =========================================================================
-//  DÉROULÉ DU JEU
-// =========================================================================
+
 function startMene(){
   clearEnd();
   aimSince=performance.now();
@@ -579,9 +535,9 @@ let settleAt=0;
 function resolve(){
   const total=G.thrown[0]+G.thrown[1];
   aimSince=performance.now();
-  if(total===0){                     // le cochonnet vient d'atterrir
+  if(total===0){                  
     if(Math.random()<0.55)papiSay('jack');
-    G.turn=1;                        // l'AUTRE joueur joue la 1re boule
+    G.turn=1;                        
     G.phase='aim'; updateHUD(); showPreview(); promptTurn(); return;
   }
   if(G.lastBall){
@@ -591,7 +547,7 @@ function resolve(){
   if(total>=BALLS_PER_PLAYER*2){endMene();return;}
   const has0=G.thrown[0]<BALLS_PER_PLAYER, has1=G.thrown[1]<BALLS_PER_PLAYER;
   const lead=leadingTeam();
-  G.turn=(has0&&has1)?(lead===0?1:0):(has0?0:1);   // qui ne tient pas le point rejoue
+  G.turn=(has0&&has1)?(lead===0?1:0):(has0?0:1);  
   if(lead>=0)flash(`${TEAM_NAME[lead]} tient le point`);
   G.phase='aim'; updateHUD(); showPreview(); promptTurn();
 }
@@ -614,9 +570,7 @@ function promptTurn(){
   else hideAimHint();
 }
 
-// =========================================================================
-//  HUD
-// =========================================================================
+
 const hud=document.getElementById('hud');
 function updateHUD(){
   document.querySelector('#scoreA .n').textContent=G.score[0];
@@ -642,9 +596,6 @@ const aimhint=document.getElementById('aimhint'),aimTxt=document.getElementById(
 function showAimHint(t){if(t)aimTxt.textContent=t;aimhint.style.display='block';}
 function hideAimHint(){aimhint.style.display='none';}
 
-// =========================================================================
-//  ONLINE — Supabase Realtime (broadcast, rejeu déterministe des coups)
-// =========================================================================
 let sb=null;
 async function loadSB(){if(sb)return sb;
   const m=await import('https://esm.sh/@supabase/supabase-js@2');
@@ -662,9 +613,9 @@ async function hostGame(){
   document.getElementById('lobbyCode').textContent=G.code;showScreen('scrLobby');
   setLobbyStatus('En attente du 2ᵉ joueur…');
   const ch=sb.channel('petanque-'+G.code,{config:{broadcast:{self:false,ack:true}}});G.channel=ch;
-  // à chaque "join" reçu (l'invité peut en envoyer plusieurs) : on (re)confirme "start"
+ 
   ch.on('broadcast',{event:'join'},()=>{
-    sendMsg('start',{});                 // idempotent : répond à chaque tentative
+    sendMsg('start',{});               
     if(!handshakeDone){handshakeDone=true;beginOnline();}
   });
   ch.on('broadcast',{event:'jackThrow'},({payload})=>doJackThrow(payload.angle,payload.power));
@@ -689,7 +640,7 @@ async function joinGame(code){
   ch.on('broadcast',{event:'throw'},({payload})=>doThrow(0,payload.angle,payload.power));
   ch.subscribe(status=>{
     if(status==='SUBSCRIBED'){
-      // on redemande jusqu'à ce que l'hôte réponde "start" (évite la course de souscription)
+    
       sendMsg('join',{});
       let tries=0;
       joinTimer=setInterval(()=>{
@@ -712,9 +663,7 @@ function beginOnline(){
 // ---------- fallback local (2 joueurs, même écran) ----------
 function startLocal(){G.mode='local';hideScreens();hud.style.display='flex';G.score=[0,0];startMene();}
 
-// =========================================================================
-//  BOUCLE — accumulateur à pas fixe (déterminisme quel que soit le fps)
-// =========================================================================
+
 let last=performance.now(),accum=0;
 function loop(now){
   requestAnimationFrame(loop);
@@ -728,7 +677,7 @@ function loop(now){
     if(!anyMoving){
       if(G.phase==='fly'){G.phase='settle';settleAt=now;}
       else if(now-settleAt>450){resolve();}
-    }else if(G.phase==='settle'){G.phase='fly';}   // repercuté → on re-suit
+    }else if(G.phase==='settle'){G.phase='fly';}  
   }
   syncMeshes();
   animFX(dt);
@@ -743,9 +692,7 @@ function loop(now){
 }
 requestAnimationFrame(loop);
 
-// =========================================================================
-//  UI menus
-// =========================================================================
+
 function showScreen(id){hideScreens();document.getElementById(id).classList.remove('hidden');}
 function hideScreens(){document.querySelectorAll('.screen').forEach(s=>s.classList.add('hidden'));
   document.getElementById('cfgbar').style.display='none';}
