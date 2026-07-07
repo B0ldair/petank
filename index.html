@@ -88,10 +88,10 @@
 <div class="pbubble" id="papiBubble"><span id="papiTxt"></span></div>
 
 <div class="screen" id="scrHome">
-  <div class="logo">PÉTANQUE<br><b>PLAGE</b></div>
-  <div class="tag">Le duel de boules en ligne</div>
+  <div class="logo">PÉTANK<br><b>BOBBY</b></div>
+  <div class="tag">L'jeu d'boules mdr</div>
   <div class="card">
-    <button class="btn p" id="btnCreate">Créer une partie</button>
+    <button class="btn p" id="btnCreate">Créer ta partie</button>
     <div class="or">— OU REJOINDRE —</div>
     <input class="field" id="joinCode" maxlength="4" placeholder="CODE" autocomplete="off">
     <button class="btn s" id="btnJoin">Rejoindre</button>
@@ -295,7 +295,6 @@ function doThrow(team,angle,power){
 
 function stepOnce(){
   const objs=allObjs();
-  // intégration + sol + murs
   for(const o of objs){
     const airborne=o.y>o.r+0.0005;
     if(airborne||o.vy!==0) o.vy-=GRAV*DT;
